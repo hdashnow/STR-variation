@@ -19,12 +19,14 @@ all_annotations = get_annotations(annotation_file, gnomad_genes_file, disease_ge
 
 table(all_annotations$in_omim, all_annotations$disease_gene, useNA = 'ifany', dnn = c('in omim', 'disease gene'))
 
-# Should be 362 samples total across all datasets - need to combine them
+# Should be 362 samples total across the two datasets - need to combine them
 ### Parse/clean up data
-#controls_143.STRs = read.csv(paste0(data_dir,"PCRfreeWGS_143_STRetch_controls.STRs.annotated.tsv"), sep='\t')
 RGP_219.STRs = read.csv(paste0(data_dir,"RGP_219.STRs.annotated.tsv"), sep='\t', stringsAsFactors = F)
+RGP_219.STRs$source = 'RGP'
+controls_143.STRs = read.csv(paste0(data_dir,"PCRfreeWGS_143_STRetch_controls.STRs.annotated.tsv"), sep='\t', stringsAsFactors = F)
+controls_143.STRs$source = 'controls'
 
-all_STR_calls = RGP_219.STRs
+all_STR_calls = dplyr::bind_rows(RGP_219.STRs, controls_143.STRs)
 all_STR_calls = clean_annotations(all_STR_calls) # Set missing values to NA
 all_STR_calls$locus = paste(all_STR_calls$chrom, all_STR_calls$start, all_STR_calls$end, sep = '_')
 
@@ -49,5 +51,5 @@ all_STR_calls %>%
 STR_calls_locus = merge(STR_calls_locus, hubers_by_locus)
 STR_calls_locus = merge(STR_calls_locus, all_annotations, all.x = T)
 
-# Remove low counts without outliers
-dim(subset(STR_calls_locus, signif_0_01 != 0 & n_zeros < 0.99 * 219))
+# Caclulate proportions of STRs that are variable
+all_annotated_STRs_locus_calls = merge(all_annotations, STR_calls_locus, all.x = T)

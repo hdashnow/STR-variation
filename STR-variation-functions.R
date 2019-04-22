@@ -46,7 +46,7 @@ get_annotations = function(annotation_file, gnomad_genes_file, disease_genes_fil
   # Parse and clean up gnomad genes
   gnomad_genes = read.csv(gnomad_genes_file, sep='\t', stringsAsFactors = F)
   #keep_columns_gnomad = c('gene',	'transcript', 'chromosome',	'start_position',	'end_position', 'gene_id', 'pLI', 'max_af')
-  keep_columns_gnomad = c('gene_id', 'pLI', 'oe_lof', 'max_af')
+  keep_columns_gnomad = c('gene_id', 'pLI', 'oe_lof', 'oe_lof_upper')
   gnomad_genes = gnomad_genes[,keep_columns_gnomad]
   
   # Parse and clean up disease genes
@@ -71,6 +71,14 @@ get_annotations = function(annotation_file, gnomad_genes_file, disease_genes_fil
   # Set missing gene names to NA (otherwise will be False)
   all_annotations$disease_gene[is.na(all_annotations$gene_name)] = NA
   all_annotations$in_omim[is.na(all_annotations$gene_id) & is.na(all_annotations$gene_name)] = NA
+  
+  # Calculate oe_lof_upper and pLI deciles over all genes that overlap STRs
+  all_annotations = within(all_annotations, 
+    oe_decile <- as.integer(cut(oe_lof_upper, quantile(oe_lof_upper, seq(0, 1, 0.1), na.rm = T), include.lowest=TRUE))
+    )
+  all_annotations = within(all_annotations, 
+    pLI_decile <- as.integer(cut(pLI, quantile(pLI, seq(0, 1, 0.1), na.rm = T), include.lowest=TRUE))
+  )
   
   # Check that annotation loci are unique (so that they can be used as unique identifiers)
   stopifnot(length(all_annotations$locus) == length(unique(all_annotations$locus)))
