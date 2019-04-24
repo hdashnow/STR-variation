@@ -1,9 +1,15 @@
 library('ggplot2'); theme_set(theme_classic(base_size = 16))
-library(scales)
+library('scales')
+library('RColorBrewer')
 source('prepare_data.R')
 
 #library('plyr') <- having both of these loaded at once causes problems because they both contain summarise
 library('dplyr')
+
+
+# Look at some pathogenic loci
+RGP_sig_pathogenic_loci = all_STR_calls[!is.na(all_STR_calls$pathogenic) & all_STR_calls$project == 'RGP' & all_STR_calls$p_adj < 0.05,]
+
 
 ### Some general stats about STRs in the genome
 
@@ -75,18 +81,40 @@ table(all_annotated_STRs_locus_calls$signif_0_01 > 0) ['TRUE']/length(all_annota
 
 ### What number/proportion of individuals have STR expansions?
 all_STR_calls %>% 
-  group_by(sample) %>% 
+  group_by(sample, project) %>% 
   dplyr::summarise(signif_0_01 = sum(p_adj < 0.01), signif_0_05 = sum(p_adj < 0.05), 
             non_zero = sum(locuscoverage > 0), genomecov = mean(genomecov)
             ) -> all_STR_calls_sample
 summary(all_STR_calls_sample)
 
-ggplot(data = all_STR_calls_sample, aes(non_zero)) + geom_histogram() + 
+ggplot(data = all_STR_calls_sample, aes(non_zero, fill = project)) + geom_histogram() + 
   labs(x='Number of STR loci with any reads assigned', y='Number of samples')
-ggplot(data = all_STR_calls_sample, aes(signif_0_05)) + geom_histogram() + 
+ggplot(data = all_STR_calls_sample, aes(signif_0_05, fill = project)) + geom_histogram() + 
   labs(x='Number of STR loci significant a p<0.05', y='Number of samples')
-ggplot(data = all_STR_calls_sample, aes(signif_0_01)) + geom_histogram() + 
+ggplot(data = all_STR_calls_sample, aes(signif_0_01, fill = project)) + geom_histogram() + 
   labs(x='Number of STR loci significant a p<0.01', y='Number of samples')
+
+sequenced_together = read.table('/group/bioi1/harrietd/STR_variation/G84373_samples.txt', stringsAsFactors = F)[[1]]
+
+# A subset of the control samples have a surprisingly large number of expanded STRs
+high_var_samples = all_STR_calls_sample[all_STR_calls_sample$non_zero > 10000,]$sample
+low_var_samples = all_STR_calls_sample[all_STR_calls_sample$non_zero <= 10000,]$sample
+
+# Write the high and low var sample IDs to file
+write.table(high_var_samples,
+            file = 'high_var_samples.txt', row.names = F, col.names = F, quote = F)
+write.table(low_var_samples,
+            file = 'low_var_samples.txt', row.names = F, col.names = F, quote = F)
+
+
+
+all_STR_calls_sample[all_STR_calls_sample$non_zero < 10000 & all_STR_calls_sample$project == 'controls',]$sample
+
+tmp_df = cbind(high_var_samples, sequenced_together)
+
+ggplot(data = all_STR_calls_sample, aes(y = non_zero, x = genomecov, colour = project)) + geom_point() + 
+  labs(y='Number of STR loci with any reads assigned', y='Sequencing depth')
+ggplot(data = all_STR_calls_sample, aes(y = signif_0_01, x = genomecov, colour = project)) + geom_point()
 
 all_STR_calls_sample$seq_depth[all_STR_calls_sample$genomecov < 35] = '<35'
 all_STR_calls_sample$seq_depth[all_STR_calls_sample$genomecov >= 35] = '35-40'
@@ -108,8 +136,6 @@ all_annotated_STRs_locus_calls %>%
 
 
 # Are STRs overlapping certain features more/less likely to be significant/expanded?
-#XXX up to here/in progress
-# do hyper test?
 
 ggplot(data = all_annotated_STRs_locus_calls_feature, 
        aes(x = feature, y = any_signif_0_01/total)) + 
@@ -152,6 +178,8 @@ for (col_name in c("any_signif_0_01", "any_signif_0_05", "num_non_zero","num_zer
     print(gene_set_test(all_annotated_STRs_locus_calls_feature, feature, col_name))
   }
 }
+
+
 
 
 
@@ -225,6 +253,38 @@ ggplot(data = subset(STR_calls_locus, n_zeros/total < 0.90 & mu_locuscoverage_lo
 
 
 
+ggplot(data = STR_calls_locus, 
+       aes(x = mu_locuscoverage_log, y = s_locuscoverage_log)) +
+  geom_point(colour = 'grey') +
+  geom_point(data = subset(STR_calls_locus, known_pathogenic),
+             aes(colour = factor(signif_0_01))
+             ) + 
+  ggsave('plots/locuscov_mean_var_disease.jpg')
+
+ggplot(data = STR_calls_locus, 
+       aes(x = mu_locuscoverage_log, y = s_locuscoverage_log)) +
+  geom_point(colour = 'grey') +
+  geom_point(data = subset(STR_calls_locus, known_pathogenic),
+             aes(colour = factor(signif_0_01))
+  ) +
+  geom_text_repel(data = subset(STR_calls_locus, known_pathogenic & s_locuscoverage_log > 0.14),
+                  aes(label=pathogenic)
+  ) +
+  xlim(NA, 1.9) + 
+  ylim(NA, 0.6) + 
+  ggsave('plots/locuscov_mean_var_disease_zoom.jpg')
+
+ggplot(data = STR_calls_locus, 
+       aes(x = mu_locuscoverage_log, y = s_locuscoverage_log, colour = feature)) +
+  geom_point(colour = 'grey') +
+  geom_point(data = subset(STR_calls_locus, feature == 'exon')) +
+  geom_point(data = subset(STR_calls_locus, feature == 'CDS')) + 
+  ggsave('plots/locuscov_mean_var_exons.jpg')
+             
+   #+
+  xlim(NA, 1.9) + 
+  ylim(NA, 0.6)
+
 
 # Plot observed/expected lof
 
@@ -258,6 +318,69 @@ ggplot(data = STR_calls_locus,
   geom_point() +
   xlim(NA, 2.5) +
   geom_vline(xintercept = 0.35, colour = 'blue')
+
+
+
+
+
+
+# Calculate variance (s_locuscoverage_log) deciles over all loci ***may need to increase number of bins***
+s_quantiles = quantile(STR_calls_locus$s_locuscoverage_log, seq(0, 1, 0.1), na.rm = T)
+STR_calls_locus = within(STR_calls_locus, 
+  s_decile <- as.integer(cut(s_locuscoverage_log, quantile(s_locuscoverage_log, seq(0, 1, 0.1), na.rm = T), include.lowest=TRUE))
+)
+
+STR_loci_feature = table(STR_calls_locus$feature, useNA = 'always')
+# expected counts for each feature:
+STR_loci_feature/10
+
+STR_calls_locus$feature = factor(STR_calls_locus$feature)
+STR_calls_locus %>% group_by(s_decile, feature) %>% summarise(obs = length(feature)) %>% 
+  tidyr::complete(s_decile, feature) -> STR_calls_locus_s_decile_counts
+STR_calls_locus_s_decile_counts[is.na(STR_calls_locus_s_decile_counts)] = 0
+STR_calls_locus_s_decile_counts$exp = rep(STR_loci_feature/10, 10)
+
+
+ggplot(data = subset(STR_calls_locus_s_decile_counts, feature %in% c('CDS', 'exon', 'intron', 'intergenic')), 
+       aes(y = obs/exp, x = s_decile, colour = feature)) +
+  geom_hline(yintercept = 1, colour = 'grey', linetype = "longdash") +
+  geom_line() +
+  geom_point() +
+  scale_color_manual(values=brewer.pal(4, 'Set2')) +
+  labs(x = 'decile of variance', 
+       y = 'obs/exp loci in this cateogry') +
+  scale_x_continuous(breaks = 1:10) +
+  scale_y_continuous(breaks = 0:6) +
+  ggsave('plots/obs_exp_feature_deciles.jpg')
+
+ggplot(data = subset(STR_calls_locus_s_decile_counts, feature %in% c('CDS', 'exon', 'intron', 'intergenic')), 
+       aes(y = obs/exp, x = s_decile, colour = feature)) +
+  geom_hline(yintercept = 1, colour = 'grey', linetype = "longdash") +
+  geom_line() +
+  geom_point() +
+  scale_color_manual(values=brewer.pal(4, 'Set2')) +
+  labs(x = 'decile of variance', 
+       y = 'obs/exp loci in this cateogry') +
+  scale_x_continuous(breaks = 1:10) +
+  scale_y_continuous(breaks = 0:6, limits = c(NA,2)) +
+  ggsave('plots/obs_exp_feature_deciles_zoom.jpg')
+
+# ggplot(data = subset(STR_calls_locus_s_decile_counts, feature %in% c('exon', 'intron', 'intergenic')), 
+#        aes(y = obs/exp, x = s_decile, colour = feature)) +
+#   geom_hline(yintercept = 1, colour = 'grey') +
+#   geom_line() +
+#   geom_point() + 
+#   scale_color_manual(values=brewer.pal(4, 'Set2')[2:4]) +
+#   labs(x = 'decile of variance', 
+#        y = 'obs/exp loci in this cateogry') +
+#   scale_x_continuous(breaks = 1:10)
+
+
+
+
+#XXX up to here
+
+
 
 # Plot feature
 

@@ -22,9 +22,9 @@ table(all_annotations$in_omim, all_annotations$disease_gene, useNA = 'ifany', dn
 # Should be 362 samples total across the two datasets - need to combine them
 ### Parse/clean up data
 RGP_219.STRs = read.csv(paste0(data_dir,"RGP_219.STRs.annotated.tsv"), sep='\t', stringsAsFactors = F)
-RGP_219.STRs$source = 'RGP'
+RGP_219.STRs$project = 'RGP'
 controls_143.STRs = read.csv(paste0(data_dir,"PCRfreeWGS_143_STRetch_controls.STRs.annotated.tsv"), sep='\t', stringsAsFactors = F)
-controls_143.STRs$source = 'controls'
+controls_143.STRs$project = 'other'
 
 all_STR_calls = dplyr::bind_rows(RGP_219.STRs, controls_143.STRs)
 all_STR_calls = clean_annotations(all_STR_calls) # Set missing values to NA
