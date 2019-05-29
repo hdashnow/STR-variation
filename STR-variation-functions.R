@@ -1,11 +1,16 @@
 library('dplyr')
 
-# Set missing data to NA
-clean_annotations = function(STRs_annotated) {
+standard_chroms = paste('chr', c(1:22, 'X', 'Y'), sep = '')
+
+clean_STR_calls = function(STRs_annotated) {
+  # Remove non-canonical chromosomes
+  STRs_annotated = subset(STRs_annotated, chrom %in% standard_chroms)
+  # Set missing data to NA
   STRs_annotated[STRs_annotated == ''] = NA
-  STRs_annotated[STRs_annotated == 'nan'] = NaN
-  STRs_annotated[is.na(STRs_annotated$closest_TSS_transcript_name), 'closest_TSS_distance'] = NaN
-  STRs_annotated$feature[is.na(STRs_annotated$feature)] = 'intergenic'
+  STRs_annotated[STRs_annotated == 'nan'] = NA
+  #STRs_annotated[is.na(STRs_annotated$closest_TSS_transcript_name), 'closest_TSS_distance'] = NaN
+  #STRs_annotated$feature[is.na(STRs_annotated$feature)] = 'intergenic'
+  STRs_annotated$locuscoverage_log = STRs_annotated$total_assigned_log
   return(STRs_annotated)
 }
 
@@ -28,11 +33,17 @@ get_annotations = function(annotation_file, gnomad_genes_file, disease_genes_fil
   # Parse and clean up annotation data
   all_annotations = read.csv(annotation_file,
                              sep='\t', stringsAsFactors = F)
+  # Remove non-canonical chromosomes
+  all_annotations = subset(all_annotations, chrom %in% standard_chroms)
+  
   all_annotations[all_annotations == ''] = NA # Set empty strings to NA
   all_annotations$locus = paste(all_annotations$chrom, all_annotations$start, all_annotations$end, sep = '_')
   all_annotations$gene_id = sapply(all_annotations$gene_id, split_dot)
   all_annotations$repeatunitlen = nchar(all_annotations$repeatunit)
   all_annotations$known_pathogenic = !is.na(all_annotations$pathogenic)
+  
+  # Remove loci with repeat unit length greater than 6 bp
+  all_annotations = all_annotations[all_annotations$repeatunitlen <= 6,]
   
   # Annotate the two HD loci
   HD_indices = all_annotations$pathogenic == "HD_HTT" & !is.na(all_annotations$pathogenic)
@@ -86,5 +97,85 @@ get_annotations = function(annotation_file, gnomad_genes_file, disease_genes_fil
   return(all_annotations)
 }
 
+summary_stats = function(all_STR_calls, all_annotations) {
+  # Use hubers, not huber because huber is just using MAD to estimate scale then using that to estimate mu
+  # Note locuscoverage_log is already coverage-normalised
+  all_STR_calls %>% group_by(locus) %>%  
+    do(data.frame(hubers(.$locuscoverage_log))) ->
+    hubers_by_locus
+  setnames(hubers_by_locus, old=c("mu","s"), new=c("mu_locuscoverage_log", "s_locuscoverage_log"))
+  
+  # Calculate number of significant calls per locus at various thresholds
+  all_STR_calls %>% 
+    group_by(locus) %>% 
+    summarise(signif_0_01 = sum(p_adj < 0.01), signif_0_05 = sum(p_adj < 0.05), 
+              n_zeros = sum(locuscoverage == 0), 
+              total = length(p_adj),
+              mean_locuscoverage_log = mean(locuscoverage_log),
+              var_locuscoverage_log = var(locuscoverage_log)) ->
+    STR_calls_locus
+  
+  # Add annotations to the summary stats
+  STR_calls_locus = merge(STR_calls_locus, hubers_by_locus)
+  STR_calls_locus = merge(STR_calls_locus, all_annotations, all.x = T)
+  
+  return(STR_calls_locus)
+}
 
+mark_subsets = function(all_STR_calls){
+  all_STR_calls$project = 'other'
+  all_STR_calls$project[startsWith(all_STR_calls$sample, 'RGP_')] = 'RGP'
+  
+  # Mark samples previously identified as highly variable
+  hyper_samples = read.table('high_var_samples.txt', stringsAsFactors = F)[[1]]
+  all_STR_calls$hyper = all_STR_calls$sample %in% hyper_samples
+  
+  return(all_STR_calls)
+}
 
+read_annotate_calls = function(all_STR_calls_csv, all_annotations) {
+  all_STR_calls = read.csv(all_STR_calls_csv, sep='\t', stringsAsFactors = F)
+  
+  all_STR_calls = mark_subsets(all_STR_calls)
+  all_STR_calls = clean_STR_calls(all_STR_calls) # Set missing values to NA
+  all_STR_calls$locus = paste(all_STR_calls$chrom, all_STR_calls$start, all_STR_calls$end, sep = '_')
+  
+  # Annotate all calls
+  all_STR_calls = merge(all_STR_calls, all_annotations, all.x = T)
+  
+  return(all_STR_calls)
+}
+
+### How many STR loci show evidence of expansion in our sample?
+expansion_stats_locus = function(all_annotated_STRs_locus_calls) {
+  # Define evidence of expansion as having at least one read reported for that locus in STRetch:
+  all_annotated_STRs_locus_calls$has_counts = !is.na(all_annotated_STRs_locus_calls$total)
+  # loci with any counts
+  nonzero_loci_n = table(all_annotated_STRs_locus_calls$has_counts)['TRUE']
+  nonzero_loci_percent = table(all_annotated_STRs_locus_calls$has_counts)['TRUE']/length(all_annotated_STRs_locus_calls$has_counts) * 100
+  
+  # Has at least one significant call from STRetch
+  # sig at 0.05
+  signif_0_05_loci_n = table(all_annotated_STRs_locus_calls$signif_0_05 > 0)['TRUE']
+  signif_0_05_loci_percent = table(all_annotated_STRs_locus_calls$signif_0_05 > 0) ['TRUE']/length(all_annotated_STRs_locus_calls$signif_0_05) * 100
+  
+  # sig at 0.01
+  signif_0_01_loci_n = table(all_annotated_STRs_locus_calls$signif_0_01 > 0)['TRUE']
+  signif_0_01_loci_percent = table(all_annotated_STRs_locus_calls$signif_0_01 > 0) ['TRUE']/length(all_annotated_STRs_locus_calls$signif_0_01) * 100
+
+  return(setNames(c(nonzero_loci_n, nonzero_loci_percent, 
+                    signif_0_05_loci_n, signif_0_05_loci_percent, signif_0_01_loci_n, signif_0_01_loci_percent), 
+                  c('nonzero_loci_n','nonzero_loci_percent',
+                    'signif_0_05_loci_n','signif_0_05_loci_percent','signif_0_01_loci_n','signif_0_01_loci_percent')))
+    
+}
+
+expansion_stats_individual = function(all_STR_calls) {
+  ### What number/proportion of individuals have STR expansions?
+  all_STR_calls %>% 
+    group_by(sample, project) %>% 
+    dplyr::summarise(signif_0_01 = sum(p_adj < 0.01), signif_0_05 = sum(p_adj < 0.05), 
+                     non_zero = sum(locuscoverage > 0), genomecov = mean(genomecov)
+    ) -> all_STR_calls_sample
+  return(summary(all_STR_calls_sample))
+}
